@@ -131,21 +131,27 @@ local function watchClass(classPath)
     return true
 end
 
--- Palworld's widgets are owned by the game instance, so older instances can still be alive after a world
--- change. The live one is the instance that is attached to a parent widget. Returns a handle.
-function util.findAttached(classPath)
+-- Handles of all live instances of a class, oldest first.
+function util.instances(classPath)
     if not watchClass(classPath) then
-        return nil
+        return {}
     end
     local list = instances[classPath]
     for i = #list, 1, -1 do
-        if not util.alive(list[i]) then
+        if not util.alive(list[i]) or list[i].path:find("Default__", 1, true) then
             table.remove(list, i)
         end
     end
-    for _, handle in ipairs(list) do
-        if not handle.path:find("Default__", 1, true) and valid(handle.object:GetParent()) then
-            return handle
+    return list
+end
+
+-- Palworld's widgets are owned by the game instance, so older instances can still be alive after a world
+-- change. The live one is the newest instance that is attached to a parent widget. Returns a handle.
+function util.findAttached(classPath)
+    local list = util.instances(classPath)
+    for i = #list, 1, -1 do
+        if valid(list[i].object:GetParent()) then
+            return list[i]
         end
     end
     return nil

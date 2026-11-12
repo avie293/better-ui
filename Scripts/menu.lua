@@ -5,7 +5,6 @@ local UEHelpers = require("UEHelpers")
 
 local valid = util.valid
 
-local ESC_MENU = "/Game/Pal/Blueprint/UI/UserInterface/ESCMenu/WBP_MenuESC.WBP_MenuESC_C"
 local IN_GAME_MENU = "/Game/Pal/Blueprint/UI/InGameMainMenu/WBP_InGameMainMenu.WBP_InGameMainMenu_C"
 local ENTRY_LABEL = "HUD Layout"
 local ESC_CHECK_INTERVAL = 0.2
@@ -68,9 +67,8 @@ local clickables = {}
 local selected = hud.ELEMENTS[1].id
 local isOpen = false
 
-local escMenu
 local escEntry
-local inGameMenu
+local entryChecked = false
 local nextEscCheck = 0
 local gameFont
 
@@ -506,17 +504,21 @@ local function attached(handle)
     return util.alive(handle) and valid(handle.object:GetParent())
 end
 
-local function pauseMenuOpen()
-    if not util.alive(inGameMenu) then
-        inGameMenu = util.findAttached(IN_GAME_MENU)
+-- The pause menu sits in a CommonUI layer, so it has no parent widget; the open one is the activated one.
+local function activePauseMenu()
+    local list = util.instances(IN_GAME_MENU)
+    for i = #list, 1, -1 do
+        local handle = list[i]
+        local ok, activated = pcall(function()
+            return handle.object:IsActivated()
+        end)
+        if not ok then
+            util.warnOnce("activated", "Could not check the pause menu: " .. tostring(activated))
+        elseif activated then
+            return handle
+        end
     end
-    if not inGameMenu then
-        return false
-    end
-    local ok, activated = pcall(function()
-        return inGameMenu.object:IsActivated()
-    end)
-    return not ok or activated
+    return nil
 end
 
 function menu.open()
@@ -552,7 +554,7 @@ end
 -- Called every frame while the window is open.
 function menu.frame(now)
     -- The window lives on top of the pause menu and closes together with it.
-    if not util.alive(windowHandle) or not window:IsInViewport() or not pauseMenuOpen() then
+    if not util.alive(windowHandle) or not window:IsInViewport() or not activePauseMenu() then
         menu.close()
         return
     end
@@ -568,8 +570,16 @@ end
 
 -- Pause menu entry ----------------------------------------------------------------------------
 
+local function className(widget)
+    return widget:GetClass():GetFName():ToString()
+end
+
 local function isText(widget)
-    return widget:GetClass():GetFName():ToString():find("TextBlock", 1, true) ~= nil
+    return className(widget):find("TextBlock", 1, true) ~= nil
+end
+
+local function isEscMenu(widget)
+    return className(widget) == "WBP_MenuESC_C"
 end
 
 -- The entry is a copy of the game's small pause menu button, added below "Link Discord".
@@ -603,26 +613,35 @@ local function injectEntry(esc)
     }
 end
 
+-- The pause menu creates a new ESC menu when it is opened, so the entry is checked once per opening.
 function menu.tick(now)
-    if now >= nextEscCheck then
+    local pauseMenu = activePauseMenu()
+    if not pauseMenu then
+        entryChecked = false
+        return
+    end
+    if not entryChecked and now >= nextEscCheck then
         nextEscCheck = now + ESC_CHECK_INTERVAL
-        if not attached(escMenu) then
-            escMenu = util.findAttached(ESC_MENU)
-        end
-        -- The game can rebuild the pause menu, which drops the entry.
-        if escEntry and not attached(escEntry.handle) then
-            escEntry = nil
-        end
-        if escMenu and not escEntry then
-            escEntry = injectEntry(escMenu.object)
-        end
-        if escEntry and escEntry.text and escEntry.text:GetText():ToString() ~= ENTRY_LABEL then
-            escEntry.text:SetText(FText(ENTRY_LABEL))
+        local esc = util.findInTree(pauseMenu.object, isEscMenu)
+        if esc then
+            local address = esc:GetAddress()
+            if not (escEntry and escEntry.escAddress == address and attached(escEntry.handle)) then
+                escEntry = injectEntry(esc)
+                if escEntry then
+                    escEntry.escAddress = address
+                end
+            end
+            entryChecked = escEntry ~= nil
         end
     end
-
+    if not escEntry or not attached(escEntry.handle) then
+        return
+    end
+    if escEntry.text and escEntry.text:GetText():ToString() ~= ENTRY_LABEL then
+        escEntry.text:SetText(FText(ENTRY_LABEL))
+    end
     -- The button lives in the entry's own widget tree, so it is safe to use while the entry is attached.
-    if escEntry and escEntry.button and attached(escEntry.handle) then
+    if escEntry.button then
         local pressed = escEntry.button:IsPressed()
         if pressed and not escEntry.pressed and not isOpen then
             menu.open()
