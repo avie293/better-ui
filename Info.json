@@ -4,7 +4,7 @@
   "Thumbnail": "thumbnail.png",
   "Version": "1.0.0",
   "DebugMode": false,
-  "MinRevision": 82182,
+  "MinRevision": 102999,
   "Author": "Avie",
   "Dependencies": ["UE4SSExperimentalPW"],
   "Tags": ["UE4SS", "User Interface"],
