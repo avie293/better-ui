@@ -1,13 +1,14 @@
 local util = require("util")
+local ui = require("ui")
 local settings = require("settings")
 local hud = require("hud")
-local UEHelpers = require("UEHelpers")
 
 local valid = util.valid
 
-local IN_GAME_MENU = "/Game/Pal/Blueprint/UI/InGameMainMenu/WBP_InGameMainMenu.WBP_InGameMainMenu_C"
 local ENTRY_LABEL = "HUD Layout"
 local ESC_CHECK_INTERVAL = 0.2
+-- The ESC menu is created when the pause menu opens, so it is looked for a few times after opening.
+local ESC_CHECKS = 3
 
 local WINDOW_WIDTH, WINDOW_HEIGHT = 940, 600
 local REPEAT_DELAY, REPEAT_INTERVAL = 0.45, 0.07
@@ -60,7 +61,6 @@ local menu = {}
 local classes = {}
 local library
 local window
-local windowHandle
 local tree
 local controls = {}
 local clickables = {}
@@ -68,8 +68,9 @@ local selected = hud.ELEMENTS[1].id
 local isOpen = false
 
 local escEntry
-local entryChecked = false
+local escChecks = 0
 local nextEscCheck = 0
+local pauseOpen = false
 local gameFont
 
 -- Helpers -------------------------------------------------------------------------------------
@@ -279,7 +280,6 @@ local function buildWindow(controller)
     local _
     library = library or StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary")
     window = library:Create(controller, StaticFindObject("/Script/UMG.UserWidget"), controller)
-    windowHandle = util.handle(window)
     tree = window.WidgetTree
     clickables = {}
     controls = {}
@@ -412,7 +412,7 @@ local function setRowVisible(row, visible)
 end
 
 function menu.refreshWindow()
-    if not util.alive(windowHandle) then
+    if not window then
         return
     end
     local active = settings.activePreset()
@@ -500,39 +500,33 @@ local function pollClickable(clickable, now)
     end
 end
 
-local function attached(handle)
-    return util.alive(handle) and valid(handle.object:GetParent())
-end
+-- Everything below only touches widgets that the game currently shows, see ui.lua.
 
--- The pause menu sits in a CommonUI layer, so it has no parent widget; the open one is the activated one.
-local function activePauseMenu()
-    local list = util.instances(IN_GAME_MENU)
-    for i = #list, 1, -1 do
-        local handle = list[i]
-        local ok, activated = pcall(function()
-            return handle.object:IsActivated()
-        end)
-        if not ok then
-            util.warnOnce("activated", "Could not check the pause menu: " .. tostring(activated))
-        elseif activated then
-            return handle
-        end
+-- The open pause menu, if any. It is shown on the pause layer while the game is paused.
+local function activePauseMenu(now)
+    local widget = ui.active("Layer_2", now)
+    if widget and util.className(widget) == "WBP_InGameMainMenu_C" then
+        return widget
     end
     return nil
 end
 
-function menu.open()
-    local controller = UEHelpers.GetPlayerController()
-    if not valid(controller) then
-        return
-    end
-    if not util.alive(windowHandle) then
+-- The window stays in the viewport while hidden, so the game keeps it alive until the next map load.
+ui.onReset(function()
+    window = nil
+    tree = nil
+    isOpen = false
+    escEntry = nil
+    pauseOpen = false
+end)
+
+function menu.open(controller)
+    if not window then
         buildWindow(controller)
-    end
-    menu.refreshWindow()
-    if not window:IsInViewport() then
         window:AddToViewport(500)
     end
+    menu.refreshWindow()
+    window:SetVisibility(VISIBLE)
     isOpen = true
 end
 
@@ -541,8 +535,8 @@ function menu.close()
         return
     end
     isOpen = false
-    if util.alive(windowHandle) then
-        window:RemoveFromParent()
+    if window then
+        window:SetVisibility(COLLAPSED)
     end
     settings.save()
 end
@@ -551,10 +545,9 @@ function menu.isOpen()
     return isOpen
 end
 
--- Called every frame while the window is open.
+-- Called every frame while the window is open. The window closes together with the pause menu.
 function menu.frame(now)
-    -- The window lives on top of the pause menu and closes together with it.
-    if not util.alive(windowHandle) or not window:IsInViewport() or not activePauseMenu() then
+    if not window or not activePauseMenu(now) then
         menu.close()
         return
     end
@@ -570,30 +563,39 @@ end
 
 -- Pause menu entry ----------------------------------------------------------------------------
 
-local function className(widget)
-    return widget:GetClass():GetFName():ToString()
-end
-
 local function isText(widget)
-    return className(widget):find("TextBlock", 1, true) ~= nil
+    return util.className(widget):find("TextBlock", 1, true) ~= nil
 end
 
-local function isEscMenu(widget)
-    return className(widget) == "WBP_MenuESC_C"
+local isEscMenu = util.isClass("WBP_MenuESC_C")
+
+-- Checks through the live list whether the entry is still in it, without touching the entry itself.
+local function hasChild(list, address)
+    local ok, slots, count = pcall(function()
+        local value = list.Slots
+        return value, #value
+    end)
+    if not ok then
+        return false
+    end
+    for i = 1, count do
+        local content = slots[i].Content
+        if valid(content) and content:GetAddress() == address then
+            return true
+        end
+    end
+    return false
 end
 
 -- The entry is a copy of the game's small pause menu button, added below "Link Discord".
-local function injectEntry(esc)
-    local list = util.findInTree(esc, "VerticalBox_148")
+local function injectEntry(esc, list, controller)
     local template = util.findInTree(esc, "WBP_MenuESC_Button_S_Discord")
-    if not list or not template then
+    if not template then
         util.warnOnce("esc", "Could not add the HUD Layout entry to the pause menu")
         return nil
     end
-    local controller = UEHelpers.GetPlayerController()
     library = library or StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary")
     local entry = library:Create(controller, template:GetClass(), controller)
-    local handle = util.handle(entry)
     local slot = list:AddChildToVerticalBox(entry)
     pcall(function()
         slot:SetPadding(template.Slot.Padding)
@@ -606,45 +608,57 @@ local function injectEntry(esc)
         end)
     end
     return {
-        handle = handle,
+        address = entry:GetAddress(),
         text = text,
         button = util.findInTree(entry, "WBP_PalInvisibleButton"),
         pressed = false,
     }
 end
 
--- The pause menu creates a new ESC menu when it is opened, so the entry is checked once per opening.
-function menu.tick(now)
-    local pauseMenu = activePauseMenu()
-    if not pauseMenu then
-        entryChecked = false
+local function checkEntry(pauseMenu)
+    local esc = util.findInTree(pauseMenu, isEscMenu)
+    local list = esc and util.findInTree(esc, "VerticalBox_148")
+    if not list then
         return
     end
-    if not entryChecked and now >= nextEscCheck then
-        nextEscCheck = now + ESC_CHECK_INTERVAL
-        local esc = util.findInTree(pauseMenu.object, isEscMenu)
-        if esc then
-            local address = esc:GetAddress()
-            if not (escEntry and escEntry.escAddress == address and attached(escEntry.handle)) then
-                escEntry = injectEntry(esc)
-                if escEntry then
-                    escEntry.escAddress = address
-                end
-            end
-            entryChecked = escEntry ~= nil
+    if not (escEntry and hasChild(list, escEntry.address)) then
+        escEntry = injectEntry(esc, list, pauseMenu:GetOwningPlayer())
+    end
+    if escEntry then
+        escEntry.verified = true
+    end
+end
+
+function menu.tick(now)
+    local pauseMenu = activePauseMenu(now)
+    if not pauseMenu then
+        pauseOpen = false
+        return
+    end
+    if not pauseOpen then
+        -- The entry is only used once it has been found in this pause menu again.
+        pauseOpen = true
+        escChecks = ESC_CHECKS
+        nextEscCheck = now
+        if escEntry then
+            escEntry.verified = false
         end
     end
-    if not escEntry or not attached(escEntry.handle) then
+    if escChecks > 0 and now >= nextEscCheck then
+        escChecks = escChecks - 1
+        nextEscCheck = now + ESC_CHECK_INTERVAL
+        checkEntry(pauseMenu)
+    end
+    if not (escEntry and escEntry.verified) then
         return
     end
     if escEntry.text and escEntry.text:GetText():ToString() ~= ENTRY_LABEL then
         escEntry.text:SetText(FText(ENTRY_LABEL))
     end
-    -- The button lives in the entry's own widget tree, so it is safe to use while the entry is attached.
     if escEntry.button then
         local pressed = escEntry.button:IsPressed()
         if pressed and not escEntry.pressed and not isOpen then
-            menu.open()
+            menu.open(pauseMenu:GetOwningPlayer())
         end
         escEntry.pressed = pressed
     end

@@ -1,4 +1,5 @@
 local util = require("util")
+local ui = require("ui")
 local settings = require("settings")
 local ELEMENTS = require("elements")
 
@@ -17,11 +18,24 @@ for _, element in ipairs(ELEMENTS) do
 end
 hud.ELEMENT_BY_ID = ELEMENT_BY_ID
 
+local layout
+local layoutAddress
 local entries = {}
 local roots = {}
 local unresolved = {}
 local nextRebind = 0
 local nextEnforce = 0
+
+-- Drops every reference into the HUD without touching it; the widgets may already be freed.
+local function forget()
+    layout = nil
+    layoutAddress = nil
+    entries = {}
+    roots = {}
+    unresolved = {}
+end
+
+ui.onReset(forget)
 
 local function readColor(object, property)
     local ok, color = pcall(function()
@@ -72,17 +86,6 @@ local function applyStatic(entry)
     end
 end
 
--- Widgets inside a user widget's tree live as long as that root widget, so only the root is checked.
-local function rootAlive(entry, cache)
-    local handle = entry.root
-    local alive = cache[handle]
-    if alive == nil then
-        alive = util.alive(handle)
-        cache[handle] = alive
-    end
-    return alive
-end
-
 local function restore(entry)
     local original = entry.original
     entry.widget:SetRenderOpacity(original.opacity)
@@ -96,42 +99,37 @@ local function restore(entry)
     end
 end
 
-local function rootFor(classPath, searched)
-    local root = roots[classPath]
-    if util.alive(root) then
-        return root
+-- Roots are children of the HUD layout, so they live as long as the layout is shown.
+local function rootFor(className)
+    local root = roots[className]
+    if root == nil then
+        root = util.findInTree(layout, util.isClass(className)) or false
+        roots[className] = root
+        if root and className == ELEMENT_BY_ID.hud.root then
+            util.log("Attached to the HUD, preset: " .. settings.activePreset())
+        end
     end
-    if searched[classPath] then
-        return nil
-    end
-    searched[classPath] = true
-    root = util.findAttached(classPath)
-    roots[classPath] = root
-    if root and classPath == ELEMENT_BY_ID.hud.root then
-        util.log("Attached to the HUD, preset: " .. settings.activePreset())
-    end
-    return root
+    return root or nil
 end
 
-local function createEntry(element, config, searched)
-    local root = rootFor(element.root, searched)
+local function createEntry(element, config)
+    local root = rootFor(element.root)
     if not root then
         return nil
     end
-    -- Widgets that are missing in this HUD instance are only looked up again once the HUD is recreated.
-    if unresolved[element.id] == root then
+    -- Widgets that are missing in this HUD are only looked up again once the HUD is recreated.
+    if unresolved[element.id] then
         return nil
     end
-    local widget = util.resolve(root.object, element.path)
+    local widget = util.resolve(root, element.path)
     if not widget then
-        unresolved[element.id] = root
+        unresolved[element.id] = true
         util.warnOnce("missing:" .. element.id, "Could not find the widget for '" .. element.id .. "'")
         return nil
     end
 
     local entry = {
         id = element.id,
-        root = root,
         config = config,
         widget = widget,
         original = captureOriginal(widget),
@@ -142,7 +140,7 @@ local function createEntry(element, config, searched)
     entry.applied = entry.current
 
     for _, watch in ipairs(element.watch or {}) do
-        local target = util.resolve(root.object, watch.path)
+        local target = util.resolve(root, watch.path)
         if target then
             entry.watches[#entry.watches + 1] = { definition = watch, widget = target }
             if watch.progress and not entry.bar then
@@ -155,11 +153,10 @@ local function createEntry(element, config, searched)
 end
 
 local function bind()
-    local searched = {}
     for id, config in pairs(settings.active()) do
         local element = ELEMENT_BY_ID[id]
         if element and type(config) == "table" and not entries[id] then
-            local entry = createEntry(element, config, searched)
+            local entry = createEntry(element, config)
             if entry then
                 entries[id] = entry
                 applyStatic(entry)
@@ -171,12 +168,9 @@ end
 -- Applies changed settings right away and restores elements that the active preset no longer touches.
 function hud.refresh()
     local active = settings.active()
-    local cache = {}
     for id, entry in pairs(entries) do
         local config = active[id]
-        if not rootAlive(entry, cache) then
-            entries[id] = nil
-        elseif type(config) == "table" then
+        if type(config) == "table" then
             entry.config = config
             applyStatic(entry)
         else
@@ -244,15 +238,18 @@ local function targetOpacity(entry, now)
 end
 
 function hud.tick(now, dt)
-    local stale = false
-    local cache = {}
-    for id, entry in pairs(entries) do
-        if not rootAlive(entry, cache) then
-            entries[id] = nil
-            stale = true
+    local shown = ui.active("Layer_0", now)
+    if not shown then
+        if layout then
+            forget()
         end
+        return
     end
-    if stale then
+    local address = shown:GetAddress()
+    if address ~= layoutAddress then
+        forget()
+        layout = shown
+        layoutAddress = address
         nextRebind = 0
     end
     if now >= nextRebind then

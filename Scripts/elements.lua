@@ -1,13 +1,13 @@
 -- HUD elements that can be configured.
 --
--- root:   class path of the UserWidget the lookup starts from (the live instance is found by class).
--- path:   widget names resolved one after another with GetWidgetFromName. Every entry except
+-- root:   class of the UserWidget in the HUD layout that the lookup starts from.
+-- path:   widget names looked up one after another. Every entry except
 --         the last one must be a UserWidget, because the lookup only searches its own tree.
 -- watch:  optional signals for the "auto" mode. The element is shown while a progress bar is
 --         below its threshold, or for a few seconds after a watched value changed.
 -- tint:   false for elements that are plain panels; only user widgets can be tinted.
 
-local PLAYER_UI = "/Game/Pal/Blueprint/UI/WBP_PlayerUI.WBP_PlayerUI_C"
+local PLAYER_UI = "WBP_PlayerUI_C"
 local GAUGE = { "WBP_PlayerSideInfo_Separated", "WBP_Ingame_PlayerGauge_Separated" }
 
 local function gauge(...)
@@ -211,13 +211,13 @@ return {
     {
         id = "damage_numbers",
         label = "Damage numbers",
-        root = "/Game/Pal/Blueprint/UI/DamageText/WBP_PalDamageCanvas_OneShotText.WBP_PalDamageCanvas_OneShotText_C",
+        root = "WBP_PalDamageCanvas_OneShotText_C",
         path = {},
     },
     {
         id = "enemy_markers",
         label = "Enemy alert markers",
-        root = "/Game/Pal/Blueprint/UI/EnemyMark/WBP_EnemyMark.WBP_EnemyMark_C",
+        root = "WBP_EnemyMark_C",
         path = {},
     },
 }

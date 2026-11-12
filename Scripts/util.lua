@@ -85,76 +85,14 @@ function util.resolve(root, path)
     return widget
 end
 
--- Lua keeps raw pointers to objects. Once the game frees an object, even IsValid reads freed memory and can
--- crash, so objects that may be destroyed are kept as handles and looked up by path before every use.
-function util.alive(handle)
-    if not handle then
-        return false
-    end
-    local found = StaticFindObject(handle.path)
-    return found ~= nil and found:IsValid() and found:GetAddress() == handle.address
+function util.className(object)
+    return object:GetClass():GetFName():ToString()
 end
 
-function util.handle(object)
-    local handle = {
-        object = object,
-        path = object:GetFullName():match("^%S+%s+(.+)$"),
-        address = object:GetAddress(),
-    }
-    if not util.alive(handle) then
-        util.warnOnce("handle:" .. tostring(handle.path), "Could not look up " .. tostring(handle.path))
+function util.isClass(name)
+    return function(widget)
+        return util.className(widget) == name
     end
-    return handle
-end
-
--- FindAllOf walks every object in the game and takes over 20 ms, so it runs only once per class.
--- After that, new instances are reported by NotifyOnNewObject, which needs the class to be loaded.
-local instances = {}
-
-local function watchClass(classPath)
-    if instances[classPath] then
-        return true
-    end
-    if not valid(StaticFindObject(classPath)) then
-        return false
-    end
-    local list = {}
-    instances[classPath] = list
-    NotifyOnNewObject(classPath, function(object)
-        list[#list + 1] = util.handle(object)
-    end)
-    for _, object in ipairs(FindAllOf(classPath:match("%.([^%.]+)$")) or {}) do
-        if object:IsValid() then
-            list[#list + 1] = util.handle(object)
-        end
-    end
-    return true
-end
-
--- Handles of all live instances of a class, oldest first.
-function util.instances(classPath)
-    if not watchClass(classPath) then
-        return {}
-    end
-    local list = instances[classPath]
-    for i = #list, 1, -1 do
-        if not util.alive(list[i]) or list[i].path:find("Default__", 1, true) then
-            table.remove(list, i)
-        end
-    end
-    return list
-end
-
--- Palworld's widgets are owned by the game instance, so older instances can still be alive after a world
--- change. The live one is the newest instance that is attached to a parent widget. Returns a handle.
-function util.findAttached(classPath)
-    local list = util.instances(classPath)
-    for i = #list, 1, -1 do
-        if valid(list[i].object:GetParent()) then
-            return list[i]
-        end
-    end
-    return nil
 end
 
 return util
