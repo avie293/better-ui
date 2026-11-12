@@ -1,0 +1,17 @@
+{
+  "ModName": "Clean Pal UI",
+  "PackageName": "CleanPalUI",
+  "Thumbnail": "thumbnail.png",
+  "Version": "1.0.0",
+  "DebugMode": false,
+  "MinRevision": 82182,
+  "Author": "Avie",
+  "Dependencies": ["UE4SSExperimentalPW"],
+  "Tags": ["UE4SS", "User Interface"],
+  "InstallRule": [
+    {
+      "Type": "Lua",
+      "Targets": ["./Scripts"]
+    }
+  ]
+}
