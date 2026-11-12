@@ -9,23 +9,26 @@ local ESC_MENU = "/Game/Pal/Blueprint/UI/UserInterface/ESCMenu/WBP_MenuESC.WBP_M
 local IN_GAME_MENU = "/Game/Pal/Blueprint/UI/InGameMainMenu/WBP_InGameMainMenu.WBP_InGameMainMenu_C"
 local ENTRY_LABEL = "HUD Layout"
 
-local WINDOW_WIDTH, WINDOW_HEIGHT = 900, 600
-local FRAME_MS = 16
+local WINDOW_WIDTH, WINDOW_HEIGHT = 940, 600
 local REPEAT_DELAY, REPEAT_INTERVAL = 0.45, 0.07
-local OPEN_DELAY = 0.15
 
 local VISIBLE, COLLAPSED = 0, 1
 local FILL = { SizeRule = 1, Value = 1 }
-local ALIGN_FILL, ALIGN_CENTER = 0, 2
+local ALIGN_FILL, ALIGN_LEFT, ALIGN_CENTER = 0, 1, 2
+
+-- Slate colors are linear, these are written as sRGB to match what is seen on screen.
+local function srgb(r, g, b, a)
+    return { r ^ 2.2, g ^ 2.2, b ^ 2.2, a or 1 }
+end
 
 local COLOR = {
-    window = { 0.03, 0.035, 0.05, 0.95 },
-    button = { 0.11, 0.13, 0.17, 1 },
-    hover = { 0.17, 0.2, 0.26, 1 },
-    active = { 0.13, 0.42, 0.6, 1 },
-    activeHover = { 0.17, 0.5, 0.7, 1 },
-    text = { 0.92, 0.94, 0.97, 1 },
-    dim = { 0.55, 0.58, 0.64, 1 },
+    window = srgb(0.07, 0.08, 0.1, 0.96),
+    button = srgb(0.15, 0.17, 0.21),
+    hover = srgb(0.22, 0.25, 0.31),
+    active = srgb(0.16, 0.5, 0.75),
+    activeHover = srgb(0.22, 0.58, 0.83),
+    text = srgb(0.93, 0.94, 0.96),
+    dim = srgb(0.6, 0.63, 0.68),
     transparent = { 1, 1, 1, 0 },
 }
 
@@ -62,11 +65,10 @@ local controls = {}
 local clickables = {}
 local selected = hud.ELEMENTS[1].id
 local isOpen = false
-local looping = false
-local openAt
 
 local escMenu
 local escEntry
+local inGameMenu
 local nextEscCheck = 0
 local gameFont
 
@@ -151,7 +153,7 @@ local function sized(widget, width, height)
     return box
 end
 
-local function addTo(box, widget, padding, fill)
+local function addTo(box, widget, padding, fill, verticalAlignment)
     local slot
     if box:GetClass():GetFName():ToString() == "HorizontalBox" then
         slot = box:AddChildToHorizontalBox(widget)
@@ -164,7 +166,7 @@ local function addTo(box, widget, padding, fill)
     if fill then
         slot:SetSize(FILL)
     end
-    slot:SetVerticalAlignment(ALIGN_FILL)
+    slot:SetVerticalAlignment(verticalAlignment or ALIGN_FILL)
     return slot
 end
 
@@ -172,23 +174,28 @@ local function margin(left, top, right, bottom)
     return { Left = left, Top = top, Right = right, Bottom = bottom }
 end
 
--- The engine's button brush cannot be restyled from Lua, so the button is kept invisible and a border
--- inside it draws the background. Hover and press states are polled every frame.
+local function fillOverlay(overlay, widget)
+    local slot = overlay:AddChildToOverlay(widget)
+    slot:SetHorizontalAlignment(ALIGN_FILL)
+    slot:SetVerticalAlignment(ALIGN_FILL)
+end
+
+-- The engine's button style adds its own padding and cannot be restyled from Lua, so an invisible button
+-- is laid over a border that draws the background. Hover and press states are polled every frame.
 local function makeButton(label, action, options)
     options = options or {}
-    local button = construct("Button")
-    button:SetBackgroundColor(linear(COLOR.transparent))
     local border = construct("Border")
     border:SetBrushColor(linear(COLOR.button))
-    border:SetPadding(margin(10, 5, 10, 5))
-    border:SetHorizontalAlignment(ALIGN_CENTER)
+    border:SetPadding(margin(10, 0, 10, 0))
+    border:SetHorizontalAlignment(options.left and ALIGN_LEFT or ALIGN_CENTER)
     border:SetVerticalAlignment(ALIGN_CENTER)
     local text = makeText(label, options.size or 15)
     border:AddChild(text)
-    local slot = button:AddChild(border)
-    slot:SetPadding(margin(0, 0, 0, 0))
-    slot:SetHorizontalAlignment(ALIGN_FILL)
-    slot:SetVerticalAlignment(ALIGN_FILL)
+    local button = construct("Button")
+    button:SetBackgroundColor(linear(COLOR.transparent))
+    local overlay = construct("Overlay")
+    fillOverlay(overlay, border)
+    fillOverlay(overlay, button)
 
     local clickable = {
         button = button,
@@ -199,7 +206,7 @@ local function makeButton(label, action, options)
         active = false,
     }
     clickables[#clickables + 1] = clickable
-    return clickable, sized(button, options.width, options.height or 34)
+    return clickable, sized(overlay, options.width, options.height or 32)
 end
 
 local function setActive(clickable, active)
@@ -209,9 +216,8 @@ end
 
 local function makeRow(parent, label)
     local row = construct("HorizontalBox")
-    addTo(row, sized(makeText(label, 15, COLOR.dim), 150), margin(0, 0, 8, 0))
-    local slot = addTo(parent, row, margin(0, 3, 0, 3))
-    slot:SetVerticalAlignment(ALIGN_CENTER)
+    addTo(row, sized(makeText(label, 15, COLOR.dim), 150), margin(0, 0, 8, 0), false, ALIGN_CENTER)
+    addTo(parent, row, margin(0, 3, 0, 3))
     return row
 end
 
@@ -226,7 +232,7 @@ local function makeStepper(parent, label, onStep)
         onStep(1)
     end, { width = 40, repeatable = true })
     addTo(row, minus)
-    addTo(row, sized(value, 110), margin(4, 6, 4, 0))
+    addTo(row, sized(value, 110), margin(4, 0, 4, 0), false, ALIGN_CENTER)
     addTo(row, plus)
     return row, value
 end
@@ -325,13 +331,12 @@ local function buildWindow(controller)
         local clickable, widget = makeButton(definition.label, function()
             selected = definition.id
             menu.refreshWindow()
-        end, { size = 14, height = 30 })
-        clickable.border:SetHorizontalAlignment(1)
+        end, { size = 14, height = 30, left = true })
         controls.elements[definition.id] = clickable
         local slot = list:AddChild(widget)
-        slot:SetPadding(margin(0, 0, 6, 3))
+        slot:SetPadding(margin(0, 0, 10, 3))
     end
-    addTo(content, sized(list, 290), margin(0, 0, 18, 0))
+    addTo(content, sized(list, 330), margin(0, 0, 18, 0))
 
     local details = construct("VerticalBox")
     addTo(content, details, nil, true)
@@ -494,48 +499,21 @@ local function pollClickable(clickable, now)
     end
 end
 
-local function frame()
-    if not isOpen then
-        return
-    end
-    if not valid(window) or not window:IsInViewport() then
-        isOpen = false
-        return
-    end
-    local now = os.clock()
-    for i = 1, #clickables do
-        if not isOpen then
-            return
-        end
-        pollClickable(clickables[i], now)
-    end
-    -- Keep auto elements visible while they are being edited.
-    hud.reveal(selected, 0.2)
+local function attached(widget)
+    return valid(widget) and valid(widget:GetParent())
 end
 
-local function startFrameLoop()
-    if looping then
-        return
+local function pauseMenuOpen()
+    if not valid(inGameMenu) then
+        inGameMenu = util.findAttached(IN_GAME_MENU)
     end
-    looping = true
-    local queued = false
-    LoopAsync(FRAME_MS, function()
-        if not isOpen then
-            looping = false
-            return true
-        end
-        if not queued then
-            queued = true
-            ExecuteInGameThread(function()
-                queued = false
-                local ok, err = pcall(frame)
-                if not ok then
-                    util.warnOnce("menu:" .. tostring(err), "Error in the settings window: " .. tostring(err))
-                end
-            end)
-        end
+    if not inGameMenu then
         return false
+    end
+    local ok, activated = pcall(function()
+        return inGameMenu:IsActivated()
     end)
+    return not ok or activated
 end
 
 function menu.open()
@@ -550,10 +528,7 @@ function menu.open()
     if not window:IsInViewport() then
         window:AddToViewport(500)
     end
-    controller.bShowMouseCursor = true
-    library:SetInputMode_UIOnlyEx(controller, window, 0, false)
     isOpen = true
-    startFrameLoop()
 end
 
 function menu.close()
@@ -564,11 +539,6 @@ function menu.close()
     if valid(window) then
         window:RemoveFromParent()
     end
-    local controller = UEHelpers.GetPlayerController()
-    if valid(controller) then
-        library:SetInputMode_GameOnly(controller, false)
-        controller.bShowMouseCursor = false
-    end
     settings.save()
 end
 
@@ -576,11 +546,33 @@ function menu.isOpen()
     return isOpen
 end
 
+-- Called every frame while the window is open.
+function menu.frame(now)
+    -- The window lives on top of the pause menu and closes together with it.
+    if not valid(window) or not window:IsInViewport() or not pauseMenuOpen() then
+        menu.close()
+        return
+    end
+    for i = 1, #clickables do
+        if not isOpen then
+            return
+        end
+        pollClickable(clickables[i], now)
+    end
+    -- Keep auto elements visible while they are being edited.
+    hud.reveal(selected, 0.2)
+end
+
 -- Pause menu entry ----------------------------------------------------------------------------
 
+local function isText(widget)
+    return widget:GetClass():GetFName():ToString():find("TextBlock", 1, true) ~= nil
+end
+
+-- The entry is a copy of the game's small pause menu button, added below "Link Discord".
 local function injectEntry(esc)
-    local list = util.findInTree(esc, "VerticalBox_91")
-    local template = util.findInTree(esc, "WBP_MenuESC_Button_Tips")
+    local list = util.findInTree(esc, "VerticalBox_148")
+    local template = util.findInTree(esc, "WBP_MenuESC_Button_S_Discord")
     if not list or not template then
         util.warnOnce("esc", "Could not add the HUD Layout entry to the pause menu")
         return nil
@@ -592,7 +584,7 @@ local function injectEntry(esc)
     pcall(function()
         slot:SetPadding(template.Slot.Padding)
     end)
-    local text = util.findInTree(entry, "Text_Main")
+    local text = util.findInTree(entry, "Text_Main") or util.findInTree(entry, isText)
     if text and not gameFont then
         pcall(function()
             local font = text.Font
@@ -607,36 +599,16 @@ local function injectEntry(esc)
     }
 end
 
-local function onEntryClicked(now)
-    -- Close the pause menu first so the HUD can be seen while editing.
-    local inGameMenu = util.findAttached(IN_GAME_MENU)
-    if inGameMenu then
-        local ok, err = pcall(function()
-            inGameMenu:DeactivateWidget()
-        end)
-        if not ok then
-            util.warnOnce("deactivate", "Could not close the pause menu: " .. tostring(err))
-        end
-    end
-    -- Opening right away would be undone when the game restores its own input mode.
-    openAt = now + OPEN_DELAY
-end
-
 function menu.tick(now)
-    if openAt and now >= openAt then
-        openAt = nil
-        menu.open()
-    end
-
     if now >= nextEscCheck then
         nextEscCheck = now + 1
-        if not valid(escMenu) then
+        if not attached(escMenu) then
             escMenu = util.findAttached(ESC_MENU)
         end
-        if valid(escMenu) and (not escEntry or not valid(escEntry.widget)) then
+        -- The game can rebuild the pause menu, which drops the entry.
+        if escMenu and not (escEntry and attached(escEntry.widget)) then
             escEntry = injectEntry(escMenu)
         end
-        -- The button resets its label when the pause menu is rebuilt.
         if escEntry and escEntry.text and escEntry.text:GetText():ToString() ~= ENTRY_LABEL then
             escEntry.text:SetText(FText(ENTRY_LABEL))
         end
@@ -644,8 +616,8 @@ function menu.tick(now)
 
     if escEntry and valid(escEntry.button) then
         local pressed = escEntry.button:IsPressed()
-        if pressed and not escEntry.pressed then
-            onEntryClicked(now)
+        if pressed and not escEntry.pressed and not isOpen then
+            menu.open()
         end
         escEntry.pressed = pressed
     end

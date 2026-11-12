@@ -31,7 +31,14 @@ end
 
 -- GetWidgetFromName does not find anything in Palworld's widgets, so the tree is walked by hand.
 -- Only the user widget's own tree is searched; nested user widgets are separate steps in a path.
-function util.findInTree(userWidget, name)
+-- The match is either a widget name or a function that receives each widget.
+function util.findInTree(userWidget, match)
+    local matches = match
+    if type(match) == "string" then
+        matches = function(widget)
+            return widget:GetFName():ToString() == match
+        end
+    end
     local tree = util.nestedTree(userWidget)
     if not tree then
         return nil
@@ -43,7 +50,7 @@ function util.findInTree(userWidget, name)
         queue[head] = false
         head = head + 1
         if valid(widget) then
-            if widget:GetFName():ToString() == name then
+            if matches(widget) then
                 return widget
             end
             if not util.nestedTree(widget) then
