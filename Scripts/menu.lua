@@ -8,6 +8,7 @@ local valid = util.valid
 local ESC_MENU = "/Game/Pal/Blueprint/UI/UserInterface/ESCMenu/WBP_MenuESC.WBP_MenuESC_C"
 local IN_GAME_MENU = "/Game/Pal/Blueprint/UI/InGameMainMenu/WBP_InGameMainMenu.WBP_InGameMainMenu_C"
 local ENTRY_LABEL = "HUD Layout"
+local ESC_CHECK_INTERVAL = 0.2
 
 local WINDOW_WIDTH, WINDOW_HEIGHT = 940, 600
 local REPEAT_DELAY, REPEAT_INTERVAL = 0.45, 0.07
@@ -60,6 +61,7 @@ local menu = {}
 local classes = {}
 local library
 local window
+local windowHandle
 local tree
 local controls = {}
 local clickables = {}
@@ -279,6 +281,7 @@ local function buildWindow(controller)
     local _
     library = library or StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary")
     window = library:Create(controller, StaticFindObject("/Script/UMG.UserWidget"), controller)
+    windowHandle = util.handle(window)
     tree = window.WidgetTree
     clickables = {}
     controls = {}
@@ -411,7 +414,7 @@ local function setRowVisible(row, visible)
 end
 
 function menu.refreshWindow()
-    if not valid(window) then
+    if not util.alive(windowHandle) then
         return
     end
     local active = settings.activePreset()
@@ -499,19 +502,19 @@ local function pollClickable(clickable, now)
     end
 end
 
-local function attached(widget)
-    return valid(widget) and valid(widget:GetParent())
+local function attached(handle)
+    return util.alive(handle) and valid(handle.object:GetParent())
 end
 
 local function pauseMenuOpen()
-    if not valid(inGameMenu) then
+    if not util.alive(inGameMenu) then
         inGameMenu = util.findAttached(IN_GAME_MENU)
     end
     if not inGameMenu then
         return false
     end
     local ok, activated = pcall(function()
-        return inGameMenu:IsActivated()
+        return inGameMenu.object:IsActivated()
     end)
     return not ok or activated
 end
@@ -521,7 +524,7 @@ function menu.open()
     if not valid(controller) then
         return
     end
-    if not valid(window) then
+    if not util.alive(windowHandle) then
         buildWindow(controller)
     end
     menu.refreshWindow()
@@ -536,7 +539,7 @@ function menu.close()
         return
     end
     isOpen = false
-    if valid(window) then
+    if util.alive(windowHandle) then
         window:RemoveFromParent()
     end
     settings.save()
@@ -549,7 +552,7 @@ end
 -- Called every frame while the window is open.
 function menu.frame(now)
     -- The window lives on top of the pause menu and closes together with it.
-    if not valid(window) or not window:IsInViewport() or not pauseMenuOpen() then
+    if not util.alive(windowHandle) or not window:IsInViewport() or not pauseMenuOpen() then
         menu.close()
         return
     end
@@ -580,6 +583,7 @@ local function injectEntry(esc)
     local controller = UEHelpers.GetPlayerController()
     library = library or StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary")
     local entry = library:Create(controller, template:GetClass(), controller)
+    local handle = util.handle(entry)
     local slot = list:AddChildToVerticalBox(entry)
     pcall(function()
         slot:SetPadding(template.Slot.Padding)
@@ -592,7 +596,7 @@ local function injectEntry(esc)
         end)
     end
     return {
-        widget = entry,
+        handle = handle,
         text = text,
         button = util.findInTree(entry, "WBP_PalInvisibleButton"),
         pressed = false,
@@ -601,20 +605,24 @@ end
 
 function menu.tick(now)
     if now >= nextEscCheck then
-        nextEscCheck = now + 1
+        nextEscCheck = now + ESC_CHECK_INTERVAL
         if not attached(escMenu) then
             escMenu = util.findAttached(ESC_MENU)
         end
         -- The game can rebuild the pause menu, which drops the entry.
-        if escMenu and not (escEntry and attached(escEntry.widget)) then
-            escEntry = injectEntry(escMenu)
+        if escEntry and not attached(escEntry.handle) then
+            escEntry = nil
+        end
+        if escMenu and not escEntry then
+            escEntry = injectEntry(escMenu.object)
         end
         if escEntry and escEntry.text and escEntry.text:GetText():ToString() ~= ENTRY_LABEL then
             escEntry.text:SetText(FText(ENTRY_LABEL))
         end
     end
 
-    if escEntry and valid(escEntry.button) then
+    -- The button lives in the entry's own widget tree, so it is safe to use while the entry is attached.
+    if escEntry and escEntry.button and attached(escEntry.handle) then
         local pressed = escEntry.button:IsPressed()
         if pressed and not escEntry.pressed and not isOpen then
             menu.open()

@@ -72,10 +72,18 @@ local function applyStatic(entry)
     end
 end
 
-local function restore(entry)
-    if not valid(entry.widget) then
-        return
+-- Widgets inside a user widget's tree live as long as that root widget, so only the root is checked.
+local function rootAlive(entry, cache)
+    local handle = entry.root
+    local alive = cache[handle]
+    if alive == nil then
+        alive = util.alive(handle)
+        cache[handle] = alive
     end
+    return alive
+end
+
+local function restore(entry)
     local original = entry.original
     entry.widget:SetRenderOpacity(original.opacity)
     entry.widget:SetRenderScale({ X = original.sx, Y = original.sy })
@@ -90,7 +98,7 @@ end
 
 local function rootFor(classPath, searched)
     local root = roots[classPath]
-    if valid(root) then
+    if util.alive(root) then
         return root
     end
     if searched[classPath] then
@@ -114,7 +122,7 @@ local function createEntry(element, config, searched)
     if unresolved[element.id] == root then
         return nil
     end
-    local widget = util.resolve(root, element.path)
+    local widget = util.resolve(root.object, element.path)
     if not widget then
         unresolved[element.id] = root
         util.warnOnce("missing:" .. element.id, "Could not find the widget for '" .. element.id .. "'")
@@ -123,6 +131,7 @@ local function createEntry(element, config, searched)
 
     local entry = {
         id = element.id,
+        root = root,
         config = config,
         widget = widget,
         original = captureOriginal(widget),
@@ -133,7 +142,7 @@ local function createEntry(element, config, searched)
     entry.applied = entry.current
 
     for _, watch in ipairs(element.watch or {}) do
-        local target = util.resolve(root, watch.path)
+        local target = util.resolve(root.object, watch.path)
         if target then
             entry.watches[#entry.watches + 1] = { definition = watch, widget = target }
             if watch.progress and not entry.bar then
@@ -162,13 +171,14 @@ end
 -- Applies changed settings right away and restores elements that the active preset no longer touches.
 function hud.refresh()
     local active = settings.active()
+    local cache = {}
     for id, entry in pairs(entries) do
         local config = active[id]
-        if type(config) == "table" then
+        if not rootAlive(entry, cache) then
+            entries[id] = nil
+        elseif type(config) == "table" then
             entry.config = config
-            if valid(entry.widget) then
-                applyStatic(entry)
-            end
+            applyStatic(entry)
         else
             restore(entry)
             entries[id] = nil
@@ -235,8 +245,9 @@ end
 
 function hud.tick(now, dt)
     local stale = false
+    local cache = {}
     for id, entry in pairs(entries) do
-        if not valid(entry.widget) then
+        if not rootAlive(entry, cache) then
             entries[id] = nil
             stale = true
         end
