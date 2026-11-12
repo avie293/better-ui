@@ -1,7 +1,7 @@
--- Default settings of Clean Pal UI.
+-- Default settings of Better UI.
 --
 -- The settings are changed in game through the "HUD Layout" entry in the pause menu and saved to
--- %LOCALAPPDATA%\Pal\Saved\Config\CleanPalUI.lua, which can also be edited by hand while the game is closed.
+-- %LOCALAPPDATA%\Pal\Saved\Config\BetterUI.lua, which can also be edited by hand while the game is closed.
 --
 -- Settings per element (all optional):
 --   mode      "show", "hide" or "auto". "auto" only shows the element while it matters, e.g.

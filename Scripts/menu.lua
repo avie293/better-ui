@@ -518,7 +518,7 @@ local function buildWindow(controller)
     frame:AddChild(layout)
 
     local header = construct("HorizontalBox")
-    addTo(header, makeText("Clean Pal UI", 26), nil, true, ALIGN_CENTER)
+    addTo(header, makeText("Better UI", 26), nil, true, ALIGN_CENTER)
     local _, apply = makeButton("Apply", menu.apply, { width = 110, height = 36 })
     addTo(header, apply, margin(0, 0, 8, 0))
     local _, done = makeButton("Done", function()

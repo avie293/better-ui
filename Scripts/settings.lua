@@ -10,10 +10,10 @@ end
 local SCRIPT_DIR = scriptDir()
 local LOCAL_APP_DATA = os.getenv("LOCALAPPDATA")
 -- Palworld's own config folder: it exists for every player and is left alone by mod updates.
-local CONFIG_PATH = (LOCAL_APP_DATA and (LOCAL_APP_DATA .. "\\Pal\\Saved\\Config\\") or SCRIPT_DIR) .. "CleanPalUI.lua"
+local CONFIG_PATH = (LOCAL_APP_DATA and (LOCAL_APP_DATA .. "\\Pal\\Saved\\Config\\") or SCRIPT_DIR) .. "BetterUI.lua"
 
 local HEADER = [[
--- Clean Pal UI settings. Use the "HUD Layout" entry in the pause menu to change them in game.
+-- Better UI settings. Use the "HUD Layout" entry in the pause menu to change them in game.
 -- This file is rewritten by the mod; delete it to restore the defaults.
 
 ]]
@@ -116,7 +116,7 @@ function settings.load()
     if not source then
         return
     end
-    local loaded, err = evaluate(source, "CleanPalUI.lua")
+    local loaded, err = evaluate(source, "BetterUI.lua")
     if not loaded then
         util.log("Could not load " .. CONFIG_PATH .. ": " .. tostring(err) .. ". Using the defaults.")
         return

@@ -1,7 +1,7 @@
 local util = {}
 
 function util.log(message)
-    print(string.format("[CleanPalUI] %s\n", message))
+    print(string.format("[BetterUI] %s\n", message))
 end
 
 local warned = {}
