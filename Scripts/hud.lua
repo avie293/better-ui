@@ -4,6 +4,9 @@ local settings = require("settings")
 local ELEMENTS = require("elements")
 
 local REBIND_INTERVAL = 1.0
+-- The density setting also scales the HUD.
+local HUD_DENSITY = { compact = 0.9, default = 1.0, spacious = 1.1 }
+local MAX_BLOCK_DEPTH = 6
 local ENFORCE_INTERVAL = 1.0
 local PROGRESS_EPSILON = 0.001
 
@@ -23,6 +26,7 @@ local layoutAddress
 local entries = {}
 local roots = {}
 local unresolved = {}
+local blocks
 local nextRebind = 0
 local nextEnforce = 0
 
@@ -33,6 +37,7 @@ local function forget()
     entries = {}
     roots = {}
     unresolved = {}
+    blocks = nil
 end
 
 ui.onReset(forget)
@@ -48,13 +53,45 @@ local function readColor(object, property)
     return nil
 end
 
-local function captureOriginal(widget)
-    local original = { opacity = widget:GetRenderOpacity(), sx = 1, sy = 1, tx = 0, ty = 0 }
+local function anchors(widget)
+    local ok, minimum, maximum = pcall(function()
+        local value = widget.Slot.LayoutData.Anchors
+        return { X = value.Minimum.X, Y = value.Minimum.Y }, { X = value.Maximum.X, Y = value.Maximum.Y }
+    end)
+    if ok and type(minimum.X) == "number" then
+        return minimum, maximum
+    end
+    return nil
+end
+
+-- Scaling around the anchor keeps an element at its screen edge, e.g. a block in the bottom left corner
+-- grows up and to the right instead of out of the screen, and shrinks towards the corner.
+local function anchorPivot(widget)
+    local minimum, maximum = anchors(widget)
+    if not minimum then
+        return { X = 0.5, Y = 0.5 }
+    end
+    return {
+        X = minimum.X == maximum.X and minimum.X or 0.5,
+        Y = minimum.Y == maximum.Y and minimum.Y or 0.5,
+    }
+end
+
+local function captureTransform(widget)
+    local original = { sx = 1, sy = 1, tx = 0, ty = 0, pivot = { X = 0.5, Y = 0.5 } }
     pcall(function()
         local transform = widget.RenderTransform
         original.sx, original.sy = transform.Scale.X, transform.Scale.Y
         original.tx, original.ty = transform.Translation.X, transform.Translation.Y
+        local pivot = widget.RenderTransformPivot
+        original.pivot = { X = pivot.X, Y = pivot.Y }
     end)
+    return original
+end
+
+local function captureOriginal(widget)
+    local original = captureTransform(widget)
+    original.opacity = widget:GetRenderOpacity()
     original.color = readColor(widget, "ColorAndOpacity")
     return original
 end
@@ -63,10 +100,22 @@ local function toColor(values)
     return { R = values[1] or 1, G = values[2] or 1, B = values[3] or 1, A = values[4] or 1 }
 end
 
+-- Size of every HUD block: the density setting times the size of the "Whole HUD" element.
+local function blockScale()
+    local whole = settings.active().hud
+    return (HUD_DENSITY[settings.get("density")] or 1) * (whole and whole.scale or 1)
+end
+
+local function configFor(id)
+    return settings.active()[id]
+end
+
 local function applyStatic(entry)
     local widget, config, original = entry.widget, entry.config, entry.original
-    local scale = config.scale or 1
+    -- The whole HUD is never scaled as one piece, that would push its edges off the screen; its blocks are.
+    local scale = entry.id == "hud" and 1 or (config.scale or 1) * (entry.block and blockScale() or 1)
 
+    widget:SetRenderTransformPivot(scale ~= 1 and anchorPivot(widget) or original.pivot)
     widget:SetRenderScale({ X = original.sx * scale, Y = original.sy * scale })
     widget:SetRenderTranslation({ X = original.tx + (config.x or 0), Y = original.ty + (config.y or 0) })
 
@@ -89,6 +138,7 @@ end
 local function restore(entry)
     local original = entry.original
     entry.widget:SetRenderOpacity(original.opacity)
+    entry.widget:SetRenderTransformPivot(original.pivot)
     entry.widget:SetRenderScale({ X = original.sx, Y = original.sy })
     entry.widget:SetRenderTranslation({ X = original.tx, Y = original.ty })
     if entry.tinted and original.color then
@@ -152,12 +202,94 @@ local function createEntry(element, config)
     return entry
 end
 
+local function isStretched(widget)
+    local minimum, maximum = anchors(widget)
+    return minimum ~= nil and minimum.X ~= maximum.X and minimum.Y ~= maximum.Y
+end
+
+local function childrenOf(widget)
+    local tree = util.nestedTree(widget)
+    if tree then
+        return { tree.RootWidget }
+    end
+    local ok, slots, count = pcall(function()
+        local value = widget.Slots
+        return value, #value
+    end)
+    local children = {}
+    if ok then
+        for i = 1, count do
+            local content = slots[i].Content
+            if valid(content) then
+                children[#children + 1] = content
+            end
+        end
+    end
+    return children
+end
+
+-- The HUD consists of full screen grouping panels that hold blocks anchored to a screen edge.
+local function collectBlocks(widget, depth, found)
+    for _, child in ipairs(childrenOf(widget)) do
+        local root = not pcall(function()
+            return child.Slot:IsValid() or error()
+        end)
+        if depth < MAX_BLOCK_DEPTH and (root or isStretched(child)) then
+            collectBlocks(child, depth + 1, found)
+        else
+            found[#found + 1] = { widget = child, address = child:GetAddress(), original = captureTransform(child) }
+        end
+    end
+    return found
+end
+
+local function blockFor(widget)
+    local address = widget:GetAddress()
+    for _, block in ipairs(blocks or {}) do
+        if block.address == address then
+            return block
+        end
+    end
+    return nil
+end
+
+local function applyBlocks()
+    if not blocks then
+        return
+    end
+    local scale = blockScale()
+    for _, block in ipairs(blocks) do
+        if not block.entry and (scale ~= 1 or block.scaled) then
+            local original = block.original
+            block.widget:SetRenderTransformPivot(scale ~= 1 and anchorPivot(block.widget) or original.pivot)
+            block.widget:SetRenderScale({ X = original.sx * scale, Y = original.sy * scale })
+            block.scaled = scale ~= 1
+        end
+    end
+end
+
 local function bind()
-    for id, config in pairs(settings.active()) do
-        local element = ELEMENT_BY_ID[id]
-        if element and type(config) == "table" and not entries[id] then
+    if not blocks then
+        local playerUi = rootFor(ELEMENT_BY_ID.hud.root)
+        if playerUi then
+            blocks = collectBlocks(playerUi, 0, {})
+            applyBlocks()
+        end
+    end
+    for _, element in ipairs(ELEMENTS) do
+        local id = element.id
+        local config = configFor(id)
+        if type(config) == "table" and not entries[id] then
             local entry = createEntry(element, config)
             if entry then
+                local block = blockFor(entry.widget)
+                if block then
+                    -- The entry takes over the block, starting from its untouched transform.
+                    block.entry = entry
+                    entry.block = true
+                    entry.original.sx, entry.original.sy = block.original.sx, block.original.sy
+                    entry.original.pivot = block.original.pivot
+                end
                 entries[id] = entry
                 applyStatic(entry)
             end
@@ -167,17 +299,22 @@ end
 
 -- Applies changed settings right away and restores elements that the active preset no longer touches.
 function hud.refresh()
-    local active = settings.active()
     for id, entry in pairs(entries) do
-        local config = active[id]
+        local config = configFor(id)
         if type(config) == "table" then
             entry.config = config
             applyStatic(entry)
         else
             restore(entry)
             entries[id] = nil
+            local block = blockFor(entry.widget)
+            if block then
+                block.entry = nil
+                block.scaled = true
+            end
         end
     end
+    applyBlocks()
     nextRebind = 0
 end
 
