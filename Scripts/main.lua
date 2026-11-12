@@ -185,11 +185,13 @@ local function findInTree(userWidget, name)
                 return widget
             end
             if not nestedTree(widget) then
-                local ok, slots = pcall(function()
-                    return widget.Slots
+                -- Widgets without children return a placeholder object for Slots that has no length.
+                local ok, slots, count = pcall(function()
+                    local value = widget.Slots
+                    return value, #value
                 end)
-                if ok and slots then
-                    for i = 1, #slots do
+                if ok then
+                    for i = 1, count do
                         local slot = slots[i]
                         local content = valid(slot) and slot.Content
                         if valid(content) then
