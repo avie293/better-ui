@@ -6,9 +6,6 @@ local hud = require("hud")
 local valid = util.valid
 
 local ENTRY_LABEL = "HUD Layout"
-local ESC_CHECK_INTERVAL = 0.2
--- The ESC menu is created when the pause menu opens, so it is looked for a few times after opening.
-local ESC_CHECKS = 3
 
 local WINDOW_WIDTH, WINDOW_HEIGHT = 940, 600
 local REPEAT_DELAY, REPEAT_INTERVAL = 0.45, 0.07
@@ -68,9 +65,6 @@ local selected = hud.ELEMENTS[1].id
 local isOpen = false
 
 local escEntry
-local escChecks = 0
-local nextEscCheck = 0
-local pauseOpen = false
 local gameFont
 
 -- Helpers -------------------------------------------------------------------------------------
@@ -517,7 +511,6 @@ ui.onReset(function()
     tree = nil
     isOpen = false
     escEntry = nil
-    pauseOpen = false
 end)
 
 function menu.open(controller)
@@ -615,7 +608,13 @@ local function injectEntry(esc, list, controller)
     }
 end
 
-local function checkEntry(pauseMenu)
+-- The same in-game menu also shows the inventory and other tabs, which replace the ESC menu and with it the
+-- entry. So the entry is only used after finding it in the ESC menu that is shown right now.
+function menu.tick(now)
+    local pauseMenu = activePauseMenu(now)
+    if not pauseMenu then
+        return
+    end
     local esc = util.findInTree(pauseMenu, isEscMenu)
     local list = esc and util.findInTree(esc, "VerticalBox_148")
     if not list then
@@ -623,34 +622,9 @@ local function checkEntry(pauseMenu)
     end
     if not (escEntry and hasChild(list, escEntry.address)) then
         escEntry = injectEntry(esc, list, pauseMenu:GetOwningPlayer())
-    end
-    if escEntry then
-        escEntry.verified = true
-    end
-end
-
-function menu.tick(now)
-    local pauseMenu = activePauseMenu(now)
-    if not pauseMenu then
-        pauseOpen = false
-        return
-    end
-    if not pauseOpen then
-        -- The entry is only used once it has been found in this pause menu again.
-        pauseOpen = true
-        escChecks = ESC_CHECKS
-        nextEscCheck = now
-        if escEntry then
-            escEntry.verified = false
+        if not escEntry then
+            return
         end
-    end
-    if escChecks > 0 and now >= nextEscCheck then
-        escChecks = escChecks - 1
-        nextEscCheck = now + ESC_CHECK_INTERVAL
-        checkEntry(pauseMenu)
-    end
-    if not (escEntry and escEntry.verified) then
-        return
     end
     if escEntry.text and escEntry.text:GetText():ToString() ~= ENTRY_LABEL then
         escEntry.text:SetText(FText(ENTRY_LABEL))
