@@ -9,6 +9,7 @@ local util = require("util")
 
 local SEARCH_DELAY = 2
 local SEARCH_INTERVAL = 5
+local ROOT_CLASS = "WBP_PalOverallUILayout_C"
 
 local ui = {}
 
@@ -46,7 +47,7 @@ local function findRoot(now)
         return nil
     end
     nextSearch = now + SEARCH_INTERVAL
-    for _, layout in ipairs(FindAllOf("WBP_PalOverallUILayout_C") or {}) do
+    for _, layout in ipairs(FindAllOf(ROOT_CLASS) or {}) do
         if layout:IsValid() and layout:IsInViewport() then
             return layout
         end
@@ -54,19 +55,29 @@ local function findRoot(now)
     return nil
 end
 
--- The widget a layer currently shows: Layer_0 holds the HUD, Layer_2 the pause menu.
-function ui.active(layerName, now)
+function ui.root(now)
     if not root then
         root = findRoot(now)
-        if not root then
-            return nil
-        end
     end
-    local layer = layers[layerName]
-    if layer == nil then
-        layer = util.findInTree(root, layerName) or false
-        layers[layerName] = layer
+    return root
+end
+
+-- A named widget in the root layout, e.g. a layer or the root panel. It lives as long as the root.
+function ui.find(name, now)
+    if not ui.root(now) then
+        return nil
     end
+    local widget = layers[name]
+    if widget == nil then
+        widget = util.findInTree(root, name) or false
+        layers[name] = widget
+    end
+    return widget or nil
+end
+
+-- The widget a layer currently shows: Layer_0 holds the HUD, Layer_2 the pause menu.
+function ui.active(layerName, now)
+    local layer = ui.find(layerName, now)
     if not layer then
         return nil
     end

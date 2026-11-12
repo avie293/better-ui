@@ -165,6 +165,16 @@ function settings.get(key)
     return config[key]
 end
 
+function settings.set(key, value)
+    config[key] = value
+    settings.markDirty()
+end
+
+function settings.setTheme(field, value)
+    config.theme[field] = value
+    settings.markDirty()
+end
+
 function settings.presetNames()
     return config.preset_order
 end

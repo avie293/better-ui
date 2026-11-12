@@ -1,11 +1,12 @@
 local util = require("util")
+local ui = require("ui")
 local settings = require("settings")
 
--- Restyles Palworld's menus by editing the widget templates of each widget blueprint class.
+-- Restyles Palworld's menus.
 --
--- Every new widget copies its tree from the template of its class, so a template that is changed right before
--- the first widget of its class is created makes every widget of that class use the theme. Nothing is done
--- per frame and no live widget is touched. Theme changes reach menus the next time they are created.
+-- The first time a menu is shown, its widgets are styled once, together with the widget templates of every
+-- widget blueprint class in it. New widgets copy their tree from these templates, so later menus of the same
+-- classes come out styled without any further work. Only widgets that the game shows right now are touched.
 
 local HIDDEN = 2
 
@@ -50,6 +51,18 @@ local PALETTES = {
 }
 
 local DENSITY = { compact = 0.6, default = 1.0, spacious = 1.4 }
+
+-- Ready-made combinations for the settings window.
+local PRESETS = {
+    { name = "Vanilla", enabled = false },
+    { name = "Clean", accent = "Blue", background = "Graphite", text = "Soft", highlight = "Orange" },
+    { name = "Teal", accent = "Teal", background = "Graphite", text = "Soft", highlight = "Gold" },
+    { name = "Midnight", accent = "Purple", background = "Midnight", text = "Cool", highlight = "Pink" },
+    { name = "Ember", accent = "Orange", background = "Black", text = "Warm", highlight = "Gold" },
+    { name = "Forest", accent = "Green", background = "Forest", text = "Warm", highlight = "Gold" },
+    { name = "Mono", accent = "White", background = "Black", text = "Soft", highlight = "Gold" },
+}
+local PRESET_FIELDS = { "accent", "background", "text", "highlight" }
 
 -- Purely decorative images: dot patterns, flares, triangle patterns and drop shadows.
 local DECORATION_NAMES = {
@@ -199,7 +212,6 @@ end
 
 -- Original values by "<class>/<widget>", captured before the first change so a theme can be swapped or removed.
 local originals = {}
-local processed = {}
 
 local function readColor(value)
     return { R = value.R, G = value.G, B = value.B, A = value.A }
@@ -252,8 +264,12 @@ end
 
 local function styleImage(node, name, original)
     if isDecoration(name, original.resource) then
-        local hide = active and not active.decorations
-        node:SetVisibility(hide and HIDDEN or original.visibility)
+        if active and not active.decorations then
+            node:SetVisibility(HIDDEN)
+        elseif node:GetVisibility() == HIDDEN then
+            -- Only undo the hiding; the game may have hidden or shown the widget itself since.
+            node:SetVisibility(original.visibility)
+        end
         return
     end
     local color
@@ -403,17 +419,24 @@ local function styleClass(class)
     styleAnimations(class, owner)
 end
 
--- Runs while a widget is being created, before it copies its tree from the template.
-local function onWidgetCreated(widget)
-    local class = widget:GetClass()
+-- Live menus ---------------------------------------------------------------------------------------
+
+local LAYERS = { "Layer_0", "Layer_1", "Layer_2", "Layer_3", "Layer_4", "Layer_5", "Layer_6", "Layer_7", "Menu",
+    "Modal" }
+
+-- Classes whose template and animations use the current theme.
+local styledClasses = {}
+-- Classes whose shown widgets were walked once, so later widgets of them come from styled templates.
+local walkedClasses = {}
+-- Address of the widget each layer showed last time.
+local shown = {}
+
+local function ensureClass(class)
     local address = class:GetAddress()
-    if processed[address] then
+    if styledClasses[address] then
         return
     end
-    processed[address] = true
-    if util.className(class) ~= "WidgetBlueprintGeneratedClass" then
-        return
-    end
+    styledClasses[address] = true
     local ok, err = pcall(styleClass, class)
     if not ok then
         util.warnOnce("theme:" .. tostring(err),
@@ -421,18 +444,112 @@ local function onWidgetCreated(widget)
     end
 end
 
+-- Styles a shown widget and everything in it. Plain user widgets, like the settings window, are left alone.
+local function styleLive(widget)
+    local queue = { { node = widget } }
+    local head = 1
+    while queue[head] do
+        local item = queue[head]
+        queue[head] = false
+        head = head + 1
+        local node, owner = item.node, item.owner
+        if util.valid(node) then
+            local tree = util.nestedTree(node)
+            if tree then
+                local class = node:GetClass()
+                if util.className(class) == "WidgetBlueprintGeneratedClass" then
+                    ensureClass(class)
+                    queue[#queue + 1] = { node = tree.RootWidget, owner = class:GetFName():ToString() }
+                end
+            else
+                if owner then
+                    styleNode(node, owner)
+                end
+                local ok, slots, count = pcall(function()
+                    local value = node.Slots
+                    return value, #value
+                end)
+                if ok then
+                    for i = 1, count do
+                        local content = slots[i].Content
+                        if util.valid(content) then
+                            queue[#queue + 1] = { node = content, owner = owner }
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+ui.onReset(function()
+    shown = {}
+end)
+
 local theme = {}
 theme.PALETTES = PALETTES
+theme.PRESETS = PRESETS
 
--- Templates are styled again with the new theme when the next widget of their class is created.
-function theme.refresh()
+function theme.paletteColor(kind, name)
+    return paletteColor(kind, name)
+end
+
+function theme.applyPreset(preset)
+    settings.setTheme("enabled", preset.enabled ~= false)
+    for _, field in ipairs(PRESET_FIELDS) do
+        if preset[field] then
+            settings.setTheme(field, preset[field])
+        end
+    end
+end
+
+function theme.isPresetActive(preset)
+    local config = settings.get("theme")
+    if preset.enabled == false or not config.enabled then
+        return preset.enabled == false and not config.enabled
+    end
+    for _, field in ipairs(PRESET_FIELDS) do
+        if config[field] ~= preset[field] then
+            return false
+        end
+    end
+    return true
+end
+
+-- Styles menus that are shown for the first time.
+function theme.tick(now)
+    for _, layerName in ipairs(LAYERS) do
+        local widget = ui.active(layerName, now)
+        local address = widget and widget:GetAddress()
+        if address ~= shown[layerName] then
+            shown[layerName] = address
+            if widget then
+                local class = widget:GetClass():GetAddress()
+                if not walkedClasses[class] then
+                    walkedClasses[class] = true
+                    styleLive(widget)
+                end
+            end
+        end
+    end
+end
+
+-- Uses the current settings for every template and restyles everything that is shown right now,
+-- including widgets that live outside the layers, like the focus cursor.
+function theme.apply(now)
     active = buildTheme()
-    processed = {}
+    styledClasses = {}
+    walkedClasses = {}
+    shown = {}
+    local root = ui.root(now)
+    if root then
+        styleLive(root)
+    end
+    theme.tick(now)
 end
 
 function theme.start()
     active = buildTheme()
-    NotifyOnNewObject("/Script/UMG.UserWidget", onWidgetCreated)
 end
 
 return theme

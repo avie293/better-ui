@@ -95,4 +95,22 @@ function util.isClass(name)
     end
 end
 
+-- Checks through a live panel whether a widget is still in it, without touching the widget itself.
+function util.hasChild(list, address)
+    local ok, slots, count = pcall(function()
+        local value = list.Slots
+        return value, #value
+    end)
+    if not ok then
+        return false
+    end
+    for i = 1, count do
+        local content = slots[i].Content
+        if valid(content) and content:GetAddress() == address then
+            return true
+        end
+    end
+    return false
+end
+
 return util

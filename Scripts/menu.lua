@@ -2,15 +2,21 @@ local util = require("util")
 local ui = require("ui")
 local settings = require("settings")
 local hud = require("hud")
+local theme = require("theme")
 
 local valid = util.valid
 
 local ENTRY_LABEL = "HUD Layout"
 
-local WINDOW_WIDTH, WINDOW_HEIGHT = 940, 600
+local WINDOW_WIDTH, WINDOW_HEIGHT = 1400, 820
+local SIDEBAR_WIDTH = 230
+local PAGES = { "Theme", "Colors", "Layout", "HUD" }
+local DENSITIES = { "compact", "default", "spacious" }
+local DENSITY_LABELS = { compact = "Small", default = "Default", spacious = "Big" }
+local BLUR_LEVELS = { { name = "Off", value = 0 }, { name = "Low", value = 0.5 }, { name = "Full", value = 1 } }
 local REPEAT_DELAY, REPEAT_INTERVAL = 0.45, 0.07
 
-local VISIBLE, COLLAPSED = 0, 1
+local VISIBLE, COLLAPSED, HIDDEN = 0, 1, 2
 local FILL = { SizeRule = 1, Value = 1 }
 local ALIGN_FILL, ALIGN_LEFT, ALIGN_CENTER = 0, 1, 2
 
@@ -20,7 +26,7 @@ local function srgb(r, g, b, a)
 end
 
 local COLOR = {
-    window = srgb(0.07, 0.08, 0.1, 0.96),
+    window = srgb(0.07, 0.08, 0.1),
     button = srgb(0.15, 0.17, 0.21),
     hover = srgb(0.22, 0.25, 0.31),
     active = srgb(0.16, 0.5, 0.75),
@@ -62,6 +68,7 @@ local tree
 local controls = {}
 local clickables = {}
 local selected = hud.ELEMENTS[1].id
+local page = PAGES[1]
 local isOpen = false
 
 local escEntry
@@ -270,55 +277,139 @@ end
 
 -- Window --------------------------------------------------------------------------------------
 
-local function buildWindow(controller)
-    local _
-    library = library or StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary")
-    window = library:Create(controller, StaticFindObject("/Script/UMG.UserWidget"), controller)
-    tree = window.WidgetTree
-    clickables = {}
-    controls = {}
-    pcall(function()
-        window.bIsFocusable = true
+local function capitalized(text)
+    return text:sub(1, 1):upper() .. text:sub(2)
+end
+
+local function makeHeading(parent, title, description)
+    addTo(parent, makeText(title, 22), margin(0, 0, 0, 4))
+    if description then
+        local text = makeText(description, 14, COLOR.dim)
+        text:SetAutoWrapText(true)
+        addTo(parent, text, margin(0, 0, 0, 18))
+    end
+end
+
+local function makeChoices(parent, label, names, width, onChoose, labels)
+    local row = makeRow(parent, label)
+    local choices = {}
+    for _, name in ipairs(names) do
+        local clickable, widget = makeButton(labels and labels[name] or capitalized(name), function()
+            onChoose(name)
+        end, { width = width })
+        choices[name] = clickable
+        addTo(row, widget, margin(0, 0, 6, 0))
+    end
+    return choices
+end
+
+local function themeChanged()
+    menu.refreshWindow()
+end
+
+local function buildThemePage(parent)
+    makeHeading(parent, "Theme", "Recolors the game's menus and removes visual clutter. Press Apply to see "
+        .. "changes on screen.")
+
+    local row = makeRow(parent, "Style")
+    controls.themePresets = {}
+    for _, preset in ipairs(theme.PRESETS) do
+        local clickable, widget = makeButton(preset.name, function()
+            theme.applyPreset(preset)
+            menu.refreshWindow()
+        end, { width = 118 })
+        controls.themePresets[#controls.themePresets + 1] = { preset = preset, clickable = clickable }
+        addTo(row, widget, margin(0, 0, 6, 0))
+    end
+
+    controls.decorations = makeChoices(parent, "Decorations", { "show", "hide" }, 120, function(name)
+        settings.setTheme("decorations", name == "show")
+        themeChanged()
     end)
 
-    local canvas = construct("CanvasPanel")
-    tree.RootWidget = canvas
+    local blurNames = {}
+    for i, level in ipairs(BLUR_LEVELS) do
+        blurNames[i] = level.name
+    end
+    controls.blur = makeChoices(parent, "Background blur", blurNames, 120, function(name)
+        for _, level in ipairs(BLUR_LEVELS) do
+            if level.name == name then
+                settings.setTheme("blur", level.value)
+            end
+        end
+        themeChanged()
+    end)
+end
 
-    local frame = construct("Border")
-    frame:SetBrushColor(linear(COLOR.window))
-    frame:SetPadding(margin(20, 16, 20, 16))
-    local frameSlot = canvas:AddChildToCanvas(frame)
-    frameSlot:SetAnchors({ Minimum = { X = 0.5, Y = 0.5 }, Maximum = { X = 0.5, Y = 0.5 } })
-    frameSlot:SetAlignment({ X = 0.5, Y = 0.5 })
-    frameSlot:SetPosition({ X = 0, Y = 0 })
-    frameSlot:SetSize({ X = WINDOW_WIDTH, Y = WINDOW_HEIGHT })
+local COLOR_ROWS = {
+    { field = "accent", label = "Accent", description = "Selected tabs, focused buttons and frames" },
+    { field = "background", label = "Background", description = "Panels and buttons" },
+    { field = "text", label = "Text", description = "Regular text" },
+    { field = "highlight", label = "Highlight", description = "New items and notices" },
+}
 
-    local layout = construct("VerticalBox")
-    frame:AddChild(layout)
+local function stepThemeColor(field, direction)
+    local palette = theme.PALETTES[field]
+    local currentName = settings.get("theme")[field]
+    local index = 1
+    for i, item in ipairs(palette) do
+        if item.name == currentName then
+            index = i
+        end
+    end
+    index = (index - 1 + direction) % #palette + 1
+    settings.setTheme("enabled", true)
+    settings.setTheme(field, palette[index].name)
+    themeChanged()
+end
 
-    local header = construct("HorizontalBox")
-    addTo(header, makeText("Clean Pal UI", 22), nil, true)
-    local _, close = makeButton("Close", menu.close, { width = 90 })
-    addTo(header, close)
-    addTo(layout, header, margin(0, 0, 0, 10))
+local function buildColorsPage(parent)
+    makeHeading(parent, "Colors", "Pick the colors of the theme. Choosing a style on the Theme page sets all of "
+        .. "them at once.")
+    controls.colors = {}
+    for _, entry in ipairs(COLOR_ROWS) do
+        local field = entry.field
+        local row, value = makeStepper(parent, entry.label, function(direction)
+            stepThemeColor(field, direction)
+        end)
+        local swatch = construct("Border")
+        addTo(row, sized(swatch, 56, 32), margin(12, 0, 0, 0))
+        addTo(row, makeText(entry.description, 14, COLOR.dim), margin(14, 0, 0, 0), false, ALIGN_CENTER)
+        controls.colors[field] = { value = value, swatch = swatch }
+    end
+end
+
+local function buildLayoutPage(parent)
+    makeHeading(parent, "Layout", "Size of the HUD and spacing in menus. Small fits more on screen, big is easier "
+        .. "to read.")
+    controls.density = makeChoices(parent, "Size", DENSITIES, 140, function(name)
+        settings.set("density", name)
+        hud.refresh()
+        menu.refreshWindow()
+    end, DENSITY_LABELS)
+end
+
+local function buildHudPage(parent)
+    local _
+    makeHeading(parent, "HUD", "Show, hide, move and resize every part of the HUD. Auto shows an element only "
+        .. "when it matters.")
 
     local presets = construct("HorizontalBox")
-    addTo(presets, sized(makeText("Preset", 15, COLOR.dim), 80), margin(0, 7, 0, 0))
+    addTo(presets, sized(makeText("Preset", 15, COLOR.dim), 150), margin(0, 0, 8, 0), false, ALIGN_CENTER)
     controls.presets = {}
     for _, name in ipairs(settings.presetNames()) do
-        local label = name:sub(1, 1):upper() .. name:sub(2)
-        local clickable, widget = makeButton(label, function()
+        local clickable, widget = makeButton(capitalized(name), function()
             settings.setPreset(name)
             hud.refresh()
             menu.refreshWindow()
-        end, { width = 110 })
+        end, { width = 118 })
         controls.presets[name] = clickable
         addTo(presets, widget, margin(0, 0, 6, 0))
     end
-    addTo(layout, presets, margin(0, 0, 0, 14))
+    addTo(parent, presets, margin(0, 0, 0, 14))
 
     local content = construct("HorizontalBox")
-    addTo(layout, content, nil, true)
+    addTo(parent, content, nil, true)
 
     local list = construct("ScrollBox")
     controls.elements = {}
@@ -331,7 +422,7 @@ local function buildWindow(controller)
         local slot = list:AddChild(widget)
         slot:SetPadding(margin(0, 0, 10, 3))
     end
-    addTo(content, sized(list, 330), margin(0, 0, 18, 0))
+    addTo(content, sized(list, 340), margin(0, 0, 24, 0))
 
     local details = construct("VerticalBox")
     addTo(content, details, nil, true)
@@ -348,8 +439,7 @@ local function buildWindow(controller)
     local modeRow = makeRow(editor, "Display")
     controls.modes = {}
     for _, mode in ipairs({ "show", "auto", "hide" }) do
-        local label = mode:sub(1, 1):upper() .. mode:sub(2)
-        local clickable, widget = makeButton(label, function()
+        local clickable, widget = makeButton(capitalized(mode), function()
             change("mode", mode ~= "show" and mode or nil)
         end, { width = 80 })
         controls.modes[mode] = { clickable = clickable, widget = widget }
@@ -397,6 +487,73 @@ local function buildWindow(controller)
     addTo(editor, actions, margin(0, 14, 0, 0))
 end
 
+local PAGE_BUILDERS = {
+    Theme = buildThemePage,
+    Colors = buildColorsPage,
+    Layout = buildLayoutPage,
+    HUD = buildHudPage,
+}
+
+local function buildWindow(controller)
+    library = library or StaticFindObject("/Script/UMG.Default__WidgetBlueprintLibrary")
+    window = library:Create(controller, StaticFindObject("/Script/UMG.UserWidget"), controller)
+    tree = window.WidgetTree
+    clickables = {}
+    controls = {}
+    pcall(function()
+        window.bIsFocusable = true
+    end)
+
+    local root = construct("Overlay")
+    tree.RootWidget = root
+
+    local frame = construct("Border")
+    frame:SetBrushColor(linear(COLOR.window))
+    frame:SetPadding(margin(28, 22, 28, 24))
+    local frameSlot = root:AddChildToOverlay(sized(frame, WINDOW_WIDTH, WINDOW_HEIGHT))
+    frameSlot:SetHorizontalAlignment(ALIGN_CENTER)
+    frameSlot:SetVerticalAlignment(ALIGN_CENTER)
+
+    local layout = construct("VerticalBox")
+    frame:AddChild(layout)
+
+    local header = construct("HorizontalBox")
+    addTo(header, makeText("Clean Pal UI", 26), nil, true, ALIGN_CENTER)
+    local _, apply = makeButton("Apply", menu.apply, { width = 110, height = 36 })
+    addTo(header, apply, margin(0, 0, 8, 0))
+    local _, done = makeButton("Done", function()
+        menu.apply()
+        menu.close()
+    end, { width = 110, height = 36 })
+    addTo(header, done)
+    addTo(layout, header, margin(0, 0, 0, 22))
+
+    local body = construct("HorizontalBox")
+    addTo(layout, body, nil, true)
+
+    local sidebar = construct("VerticalBox")
+    controls.tabs = {}
+    for _, name in ipairs(PAGES) do
+        local clickable, widget = makeButton(name, function()
+            page = name
+            menu.refreshWindow()
+        end, { size = 17, height = 46, left = true })
+        controls.tabs[name] = clickable
+        addTo(sidebar, widget, margin(0, 0, 0, 6))
+    end
+    addTo(body, sized(sidebar, SIDEBAR_WIDTH), margin(0, 0, 32, 0))
+
+    local pages = construct("VerticalBox")
+    addTo(body, pages, nil, true)
+    controls.pages = {}
+    for _, name in ipairs(PAGES) do
+        local content = construct("VerticalBox")
+        PAGE_BUILDERS[name](content)
+        controls.pages[name] = content
+        addTo(pages, content, nil, true)
+    end
+end
+
 local function percent(value)
     return string.format("%d%%", math.floor(value * 100 + 0.5))
 end
@@ -405,10 +562,34 @@ local function setRowVisible(row, visible)
     row:SetVisibility(visible and VISIBLE or COLLAPSED)
 end
 
-function menu.refreshWindow()
-    if not window then
-        return
+local function refreshTheme()
+    local config = settings.get("theme")
+    for _, entry in ipairs(controls.themePresets) do
+        setActive(entry.clickable, theme.isPresetActive(entry.preset))
     end
+    setActive(controls.decorations.show, config.decorations)
+    setActive(controls.decorations.hide, not config.decorations)
+    for _, level in ipairs(BLUR_LEVELS) do
+        setActive(controls.blur[level.name], math.abs(config.blur - level.value) < 0.01)
+    end
+    for field, entry in pairs(controls.colors) do
+        local name = config[field]
+        local color = config.enabled and theme.paletteColor(field, name)
+        entry.value:SetText(FText(config.enabled and name or "Vanilla"))
+        if color then
+            entry.swatch:SetBrushColor({ R = color[1], G = color[2], B = color[3], A = 1 })
+            entry.swatch:SetVisibility(VISIBLE)
+        else
+            entry.swatch:SetVisibility(HIDDEN)
+        end
+    end
+    local density = settings.get("density")
+    for _, name in ipairs(DENSITIES) do
+        setActive(controls.density[name], name == density)
+    end
+end
+
+local function refreshHud()
     local active = settings.activePreset()
     for name, clickable in pairs(controls.presets) do
         setActive(clickable, name == active)
@@ -432,7 +613,7 @@ function menu.refreshWindow()
     local supportsAuto = definition.watch ~= nil
     controls.hint:SetText(FText(supportsAuto
         and "Auto shows this element only when it matters and hides it otherwise."
-        or "Changes are applied right away and saved automatically."))
+        or "Changes are applied right away."))
 
     local mode = config.mode or "show"
     for name, entry in pairs(controls.modes) do
@@ -465,6 +646,18 @@ function menu.refreshWindow()
     if below then
         controls.below:SetText(FText(percent(config.below or below)))
     end
+end
+
+function menu.refreshWindow()
+    if not window then
+        return
+    end
+    for name, clickable in pairs(controls.tabs) do
+        setActive(clickable, name == page)
+        setRowVisible(controls.pages[name], name == page)
+    end
+    refreshTheme()
+    refreshHud()
 end
 
 -- Input ---------------------------------------------------------------------------------------
@@ -506,21 +699,52 @@ local function activePauseMenu(now)
 end
 
 -- The window stays in the viewport while hidden, so the game keeps it alive until the next map load.
-ui.onReset(function()
+-- The window is added to the root panel of the game's UI rather than to the viewport. The game can clear the
+-- viewport, but the root panel can be checked: the window is only used while the panel still lists it.
+local WINDOW_Z_ORDER = 1000
+local windowAddress
+
+local function windowAttached(now)
+    local panel = ui.find("CanvasPanel_Root", now)
+    return panel ~= nil and windowAddress ~= nil and util.hasChild(panel, windowAddress)
+end
+
+local function forgetWindow()
     window = nil
+    windowAddress = nil
     tree = nil
     isOpen = false
+end
+
+ui.onReset(function()
+    forgetWindow()
     escEntry = nil
 end)
 
-function menu.open(controller)
-    if not window then
+function menu.open(controller, now)
+    if not windowAttached(now) then
+        local panel = ui.find("CanvasPanel_Root", now)
+        if not panel then
+            return
+        end
         buildWindow(controller)
-        window:AddToViewport(500)
+        local slot = panel:AddChildToCanvas(window)
+        slot:SetAnchors({ Minimum = { X = 0, Y = 0 }, Maximum = { X = 1, Y = 1 } })
+        slot:SetOffsets({ Left = 0, Top = 0, Right = 0, Bottom = 0 })
+        slot:SetZOrder(WINDOW_Z_ORDER)
+        windowAddress = window:GetAddress()
     end
     menu.refreshWindow()
     window:SetVisibility(VISIBLE)
     isOpen = true
+end
+
+-- Gives up the window after an error so the rest of the mod keeps running.
+function menu.abandon()
+    if window and windowAttached(os.clock()) then
+        window:SetVisibility(COLLAPSED)
+    end
+    forgetWindow()
 end
 
 function menu.close()
@@ -528,8 +752,10 @@ function menu.close()
         return
     end
     isOpen = false
-    if window then
+    if windowAttached(os.clock()) then
         window:SetVisibility(COLLAPSED)
+    else
+        forgetWindow()
     end
     settings.save()
 end
@@ -538,9 +764,20 @@ function menu.isOpen()
     return isOpen
 end
 
+-- Shows theme changes on the menus that are open right now.
+function menu.apply()
+    theme.apply(os.clock())
+    hud.refresh()
+    settings.save()
+end
+
 -- Called every frame while the window is open. The window closes together with the pause menu.
 function menu.frame(now)
-    if not window or not activePauseMenu(now) then
+    if not windowAttached(now) then
+        forgetWindow()
+        return
+    end
+    if not activePauseMenu(now) then
         menu.close()
         return
     end
@@ -561,24 +798,6 @@ local function isText(widget)
 end
 
 local isEscMenu = util.isClass("WBP_MenuESC_C")
-
--- Checks through the live list whether the entry is still in it, without touching the entry itself.
-local function hasChild(list, address)
-    local ok, slots, count = pcall(function()
-        local value = list.Slots
-        return value, #value
-    end)
-    if not ok then
-        return false
-    end
-    for i = 1, count do
-        local content = slots[i].Content
-        if valid(content) and content:GetAddress() == address then
-            return true
-        end
-    end
-    return false
-end
 
 -- The entry is a copy of the game's small pause menu button, added below "Link Discord".
 local function injectEntry(esc, list, controller)
@@ -620,7 +839,7 @@ function menu.tick(now)
     if not list then
         return
     end
-    if not (escEntry and hasChild(list, escEntry.address)) then
+    if not (escEntry and util.hasChild(list, escEntry.address)) then
         escEntry = injectEntry(esc, list, pauseMenu:GetOwningPlayer())
         if not escEntry then
             return
@@ -632,7 +851,7 @@ function menu.tick(now)
     if escEntry.button then
         local pressed = escEntry.button:IsPressed()
         if pressed and not escEntry.pressed and not isOpen then
-            menu.open(pauseMenu:GetOwningPlayer())
+            menu.open(pauseMenu:GetOwningPlayer(), now)
         end
         escEntry.pressed = pressed
     end
