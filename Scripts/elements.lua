@@ -1,16 +1,16 @@
 -- HUD elements that can be configured.
 --
--- root:   class of the UserWidget the lookup starts from (the live instance is found by class).
+-- root:   class path of the UserWidget the lookup starts from (the live instance is found by class).
 -- path:   widget names resolved one after another with GetWidgetFromName. Every entry except
 --         the last one must be a UserWidget, because the lookup only searches its own tree.
 -- watch:  optional signals for the "auto" mode. The element is shown while a progress bar is
 --         below its threshold, or for a few seconds after a watched value changed.
 
-local PLAYER_UI = "WBP_PlayerUI_C"
+local PLAYER_UI = "/Game/Pal/Blueprint/UI/WBP_PlayerUI.WBP_PlayerUI_C"
 local GAUGE = { "WBP_PlayerSideInfo_Separated", "WBP_Ingame_PlayerGauge_Separated" }
 
-local function gauge(name)
-    return { GAUGE[1], GAUGE[2], name }
+local function gauge(...)
+    return { GAUGE[1], GAUGE[2], ... }
 end
 
 return {
@@ -54,7 +54,7 @@ return {
         root = PLAYER_UI,
         path = gauge("WBP_IngameHungerGauge"),
         watch = {
-            { path = { GAUGE[1], GAUGE[2], "WBP_IngameHungerGauge", "ProgressBar_219" }, progress = true, below = 0.5 },
+            { path = gauge("WBP_IngameHungerGauge", "ProgressBar_219"), progress = true, below = 0.5 },
         },
     },
     {
@@ -69,8 +69,8 @@ return {
         root = PLAYER_UI,
         path = gauge("WBP_Ingame_PalHPGauge"),
         watch = {
-            { path = { GAUGE[1], GAUGE[2], "WBP_Ingame_PalHPGauge", "ProgressBar_HPGauge" }, progress = true, below = 1.0 },
-            { path = { GAUGE[1], GAUGE[2], "WBP_Ingame_PalHPGauge", "Text_PalName" }, text = true },
+            { path = gauge("WBP_Ingame_PalHPGauge", "ProgressBar_HPGauge"), progress = true, below = 1.0 },
+            { path = gauge("WBP_Ingame_PalHPGauge", "Text_PalName"), text = true },
         },
     },
     {
@@ -207,13 +207,13 @@ return {
     {
         id = "damage_numbers",
         label = "Damage numbers",
-        root = "WBP_PalDamageCanvas_OneShotText_C",
+        root = "/Game/Pal/Blueprint/UI/DamageText/WBP_PalDamageCanvas_OneShotText.WBP_PalDamageCanvas_OneShotText_C",
         path = {},
     },
     {
         id = "enemy_markers",
         label = "Enemy alert markers",
-        root = "WBP_EnemyMark_C",
+        root = "/Game/Pal/Blueprint/UI/EnemyMark/WBP_EnemyMark.WBP_EnemyMark_C",
         path = {},
     },
 }

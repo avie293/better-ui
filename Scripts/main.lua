@@ -142,15 +142,42 @@ local function valid(object)
     return object and object:IsValid() or false
 end
 
-local function findRoot(className)
-    local candidates = FindAllOf(className)
-    if not candidates then
+-- FindAllOf walks every object in the game and takes over 20 ms, so it runs only once per class.
+-- After that, new instances are reported by NotifyOnNewObject, which needs the class to be loaded.
+local instances = {}
+
+local function watchClass(classPath)
+    if instances[classPath] then
+        return true
+    end
+    if not valid(StaticFindObject(classPath)) then
+        return false
+    end
+    local list = {}
+    instances[classPath] = list
+    NotifyOnNewObject(classPath, function(object)
+        list[#list + 1] = object
+    end)
+    for _, object in ipairs(FindAllOf(classPath:match("%.([^%.]+)$")) or {}) do
+        list[#list + 1] = object
+    end
+    return true
+end
+
+local function findRoot(classPath)
+    if not watchClass(classPath) then
         return nil
+    end
+    local list = instances[classPath]
+    for i = #list, 1, -1 do
+        if not valid(list[i]) then
+            table.remove(list, i)
+        end
     end
     -- HUD widgets are owned by the game instance, so older instances can still be alive after a world change.
     -- The live one is the instance that is attached to the HUD layout.
-    for _, widget in ipairs(candidates) do
-        if widget:IsValid() and not widget:GetFullName():find("Default__", 1, true) and valid(widget:GetParent()) then
+    for _, widget in ipairs(list) do
+        if valid(widget:GetParent()) and not widget:GetFullName():find("Default__", 1, true) then
             return widget
         end
     end
@@ -296,18 +323,18 @@ local function restore(entry)
     end
 end
 
-local function rootFor(className, searched)
-    local root = roots[className]
+local function rootFor(classPath, searched)
+    local root = roots[classPath]
     if valid(root) then
         return root
     end
-    if searched[className] then
+    if searched[classPath] then
         return nil
     end
-    searched[className] = true
-    root = findRoot(className)
-    roots[className] = root
-    if root and className == "WBP_PlayerUI_C" then
+    searched[classPath] = true
+    root = findRoot(classPath)
+    roots[classPath] = root
+    if root and classPath == ELEMENT_BY_ID.hud.root then
         log("Attached to the HUD, preset: " .. activePreset)
     end
     return root
