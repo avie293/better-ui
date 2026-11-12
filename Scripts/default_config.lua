@@ -29,6 +29,23 @@ return {
     -- Order of the preset buttons in the settings window.
     preset_order = { "clean", "minimal", "vanilla", "custom" },
 
+    -- Look of the game's menus. Changes reach a menu the next time it is created.
+    theme = {
+        enabled = true,
+        -- Palette names, see theme.lua.
+        accent = "Teal",
+        background = "Graphite",
+        text = "Soft",
+        highlight = "Gold",
+        -- Dot patterns, flares, triangle patterns and drop shadows.
+        decorations = false,
+        -- Multiplier for the background blur behind menus.
+        blur = 0.5,
+    },
+
+    -- Spacing in menus: "compact", "default" or "spacious".
+    density = "default",
+
     -- Default time "auto" elements stay visible after a change.
     auto_seconds = 4,
 

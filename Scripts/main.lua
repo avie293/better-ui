@@ -2,11 +2,13 @@ local util = require("util")
 local settings = require("settings")
 local hud = require("hud")
 local menu = require("menu")
+local theme = require("theme")
 
 local LOOP_MS = 16
 local TICK_INTERVAL = 0.05
 
 settings.load()
+theme.start()
 
 local lastTick = os.clock()
 

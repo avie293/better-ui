@@ -122,7 +122,15 @@ function settings.load()
         return
     end
     for key, value in pairs(loaded) do
-        if DEFAULTS[key] ~= nil and type(value) == type(DEFAULTS[key]) then
+        local default = DEFAULTS[key]
+        if default ~= nil and type(value) == type(default) then
+            if key == "theme" then
+                for field, fieldDefault in pairs(default) do
+                    if type(value[field]) ~= type(fieldDefault) then
+                        value[field] = fieldDefault
+                    end
+                end
+            end
             config[key] = value
         end
     end
