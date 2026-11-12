@@ -1,9 +1,7 @@
--- Clean Pal UI configuration
+-- Default settings of Clean Pal UI.
 --
--- This file is copied to %LOCALAPPDATA%\Pal\Saved\Config\CleanPalUI.lua on first launch.
--- Edit that copy; it survives mod updates. Press the reload hotkey in game to apply changes
--- (changed hotkeys themselves take effect after restarting the game).
--- Delete it to get the defaults back.
+-- The settings are changed in game through the "HUD Layout" entry in the pause menu and saved to
+-- %LOCALAPPDATA%\Pal\Saved\Config\CleanPalUI.lua, which can also be edited by hand while the game is closed.
 --
 -- Settings per element (all optional):
 --   mode      "show", "hide" or "auto". "auto" only shows the element while it matters, e.g.
@@ -25,22 +23,11 @@
 -- crosshair, jetpack, damage_vignette, damage_numbers, enemy_markers
 
 return {
-    -- Preset that is active on first launch. The last used preset is remembered afterwards.
+    -- Active preset.
     preset = "clean",
 
-    -- Order used by the "next preset" hotkey.
+    -- Order of the preset buttons in the settings window.
     preset_order = { "clean", "minimal", "vanilla", "custom" },
-
-    -- Keys: F1 - F12, A - Z, ZERO - NINE, NUM_ZERO - NUM_NINE, INS, DEL, HOME, END, PAGE_UP, PAGE_DOWN.
-    -- Modifiers: ctrl, shift, alt. Set key = "" to disable a hotkey.
-    hotkeys = {
-        next_preset = { key = "F7", ctrl = true },
-        peek = { key = "F8", ctrl = true },
-        reload = { key = "F6", ctrl = true },
-    },
-
-    -- "peek" shows the vanilla HUD for this many seconds. 0 = toggle on and off instead.
-    peek_seconds = 5,
 
     -- Default time "auto" elements stay visible after a change.
     auto_seconds = 4,

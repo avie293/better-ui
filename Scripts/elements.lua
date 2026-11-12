@@ -5,6 +5,7 @@
 --         the last one must be a UserWidget, because the lookup only searches its own tree.
 -- watch:  optional signals for the "auto" mode. The element is shown while a progress bar is
 --         below its threshold, or for a few seconds after a watched value changed.
+-- tint:   false for elements that are plain panels; only user widgets can be tinted.
 
 local PLAYER_UI = "/Game/Pal/Blueprint/UI/WBP_PlayerUI.WBP_PlayerUI_C"
 local GAUGE = { "WBP_PlayerSideInfo_Separated", "WBP_Ingame_PlayerGauge_Separated" }
@@ -43,6 +44,7 @@ return {
         label = "Player health and shield",
         root = PLAYER_UI,
         path = gauge("GaugeInfo"),
+        tint = false,
         watch = {
             { path = gauge("ProgressBar_HPGauge"), progress = true, below = 1.0 },
             { path = gauge("ProgressBar_ShieldGauge"), progress = true },
@@ -78,6 +80,7 @@ return {
         label = "Weapon, ammo and spheres",
         root = PLAYER_UI,
         path = gauge("Canvas_WeaponInfo"),
+        tint = false,
         watch = {
             { path = gauge("Text_WeaponName"), text = true },
             { path = gauge("Text_NowBulletNum"), text = true },
@@ -89,6 +92,7 @@ return {
         label = "Key hints next to the weapon",
         root = PLAYER_UI,
         path = gauge("VerticalBox_CommonKeyGuide"),
+        tint = false,
     },
     {
         id = "status_effects",
