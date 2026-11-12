@@ -5,6 +5,7 @@ local TICK_MS = 100
 local REBIND_INTERVAL = 1.0
 local ENFORCE_INTERVAL = 1.0
 local PROGRESS_EPSILON = 0.001
+local HOTKEY_DEBOUNCE = 0.3
 
 local function log(message)
     print(string.format("[%s] %s\n", MOD_NAME, message))
@@ -138,7 +139,7 @@ end
 -- Widget access -------------------------------------------------------------------------------
 
 local function valid(object)
-    return object ~= nil and object:IsValid()
+    return object and object:IsValid() or false
 end
 
 local function findRoot(className)
@@ -146,31 +147,69 @@ local function findRoot(className)
     if not candidates then
         return nil
     end
-    local fallback
+    -- HUD widgets are owned by the game instance, so older instances can still be alive after a world change.
+    -- The live one is the instance that is attached to the HUD layout.
     for _, widget in ipairs(candidates) do
-        if widget:IsValid() then
-            local name = widget:GetFullName()
-            if not name:find("Default__", 1, true) and name:find("WidgetTree", 1, true) then
-                if widget:IsVisible() then
-                    return widget
+        if widget:IsValid() and not widget:GetFullName():find("Default__", 1, true) and valid(widget:GetParent()) then
+            return widget
+        end
+    end
+    return nil
+end
+
+local function nestedTree(widget)
+    local ok, tree = pcall(function()
+        return widget.WidgetTree
+    end)
+    if ok and valid(tree) then
+        return tree
+    end
+    return nil
+end
+
+-- GetWidgetFromName does not find anything in Palworld's widgets, so the tree is walked by hand.
+-- Only the user widget's own tree is searched; nested user widgets are separate steps in the path.
+local function findInTree(userWidget, name)
+    local tree = nestedTree(userWidget)
+    if not tree then
+        return nil
+    end
+    local queue = { tree.RootWidget }
+    local head = 1
+    while queue[head] do
+        local widget = queue[head]
+        queue[head] = false
+        head = head + 1
+        if valid(widget) then
+            if widget:GetFName():ToString() == name then
+                return widget
+            end
+            if not nestedTree(widget) then
+                local ok, slots = pcall(function()
+                    return widget.Slots
+                end)
+                if ok and slots then
+                    for i = 1, #slots do
+                        local slot = slots[i]
+                        local content = valid(slot) and slot.Content
+                        if valid(content) then
+                            queue[#queue + 1] = content
+                        end
+                    end
                 end
-                fallback = fallback or widget
             end
         end
     end
-    return fallback
+    return nil
 end
 
 local function resolve(root, path)
     local widget = root
     for i = 1, #path do
-        local ok, child = pcall(function()
-            return widget:GetWidgetFromName(FName(path[i]))
-        end)
-        if not ok or not valid(child) then
+        widget = findInTree(widget, path[i])
+        if not widget then
             return nil
         end
-        widget = child
     end
     return widget
 end
@@ -266,6 +305,9 @@ local function rootFor(className, searched)
     searched[className] = true
     root = findRoot(className)
     roots[className] = root
+    if root and className == "WBP_PlayerUI_C" then
+        log("Attached to the HUD, preset: " .. activePreset)
+    end
     return root
 end
 
@@ -530,7 +572,14 @@ local function registerHotkey(name, action)
     if hotkey.alt then
         modifiers[#modifiers + 1] = ModifierKey.ALT
     end
+    local lastPress = 0
     local callback = function()
+        -- A single key press can be reported more than once.
+        local now = os.clock()
+        if now - lastPress < HOTKEY_DEBOUNCE then
+            return
+        end
+        lastPress = now
         ExecuteInGameThread(function()
             local ok, err = pcall(action)
             if not ok then
